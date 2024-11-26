@@ -80,10 +80,10 @@ static Node *create_node(unsigned char data);
 static Node *insert_node(Node *node, unsigned char data);
 
 // 가장 큰 값의 노드 찾기 (우선순위가 가장 높은 원소)
-static Node *find_max(Node *node);
+static Node *find_min(Node *node);
 
 // 삭제 연산 (우선순위가 가장 높은 원소 제거)
-static Node *delete_max(Node *node);
+static Node *delete_min(Node *node);
 
 void *thread_func(void *arg);
 
@@ -189,13 +189,48 @@ int main(int argc, char *argv[]) {
     }
     free(thread_args);
     free_tree(pq.root);
-
-    return 0;
 }
 
 // -----------------------
 // 3. 함수 정의
 // -----------------------
+
+// 우선순위 큐 초기화
+void init_priority_queue(priority_queue *pq) {
+    if (pq == NULL)
+        return;
+    pq->root = NULL;
+}
+
+// 우선순위 큐의 삽입 함수 (enqueue)
+void enqueue(priority_queue *pq, unsigned char data) {
+    if (pq == NULL)
+        return;
+    pthread_mutex_lock(&mutex);
+    pq->root = insert_node(pq->root, data);
+    pthread_mutex_unlock(&mutex);
+}
+
+unsigned char dequeue(priority_queue *pq) {
+    if (pq == NULL || pq->root == NULL) {
+        fprintf(stderr, "우선순위 큐가 비어 있습니다.\n");
+        exit(EXIT_FAILURE);
+    }
+
+    pthread_mutex_lock(&mutex);
+
+    // 가장 작은 값의 노드를 찾음
+    Node *minNode = find_min(pq->root);
+    unsigned char minValue = minNode->data;
+
+    // 가장 작은 값의 노드를 삭제
+    pq->root = delete_min(pq->root);
+
+    pthread_mutex_unlock(&mutex);
+
+    return minValue;
+}
+
 
 // 노드의 높이 반환
 static int get_height(Node *node) {
@@ -222,6 +257,11 @@ static void update_height(Node *node) {
 
 // 오른쪽 회전
 static Node *rotate_right(Node *y) {
+    if (y == NULL || y->left == NULL) {
+        fprintf(stderr, "rotate_right: 회전 불가\n");
+        return y;
+    }
+
     Node *x = y->left;
     Node *T2 = x->right;
 
@@ -238,6 +278,11 @@ static Node *rotate_right(Node *y) {
 
 // 왼쪽 회전
 static Node *rotate_left(Node *x) {
+    if (x == NULL || x->right == NULL) {
+        fprintf(stderr, "rotate_left: 회전 불가\n");
+        return x;
+    }
+
     Node *y = x->right;
     Node *T2 = y->left;
 
@@ -254,7 +299,7 @@ static Node *rotate_left(Node *x) {
 
 // 노드 생성
 static Node *create_node(unsigned char data) {
-    Node *node = (Node *) malloc(sizeof(node));
+    Node *node = (Node *) malloc(sizeof(Node)); // 수정된 부분
     if (node == NULL) {
         perror("메모리 할당 실패");
         exit(EXIT_FAILURE);
@@ -308,48 +353,51 @@ static Node *insert_node(Node *node, unsigned char data) {
 }
 
 // 가장 큰 값의 노드 찾기 (우선순위가 가장 높은 원소)
-static Node *find_max(Node *node) {
+static Node *find_min(Node *node) {
     Node *current = node;
-    while (current->right != NULL)
-        current = current->right;
+    while (current->left != NULL) {
+        current = current->left; // 왼쪽 자식으로 계속 이동
+    }
     return current;
 }
 
-// 삭제 연산 (우선순위가 가장 높은 원소 제거)
-static Node *delete_max(Node *node) {
-    if (node == NULL)
-        return node;
+// 가장 작은 값을 가진 노드 삭제
+static Node *delete_min(Node *node) {
+    if (node == NULL) {
+        fprintf(stderr, "delete_min: NULL 노드 발견\n");
+        return NULL;
+    }
 
-    if (node->right == NULL) {
-        Node *temp = node->left;
+    if (node->left == NULL) {
+        printf("delete_min: 삭제할 노드: %d\n", node->data);
+        Node *temp = node->right;
         free(node);
         return temp;
     }
 
-    node->right = delete_max(node->right);
+    printf("delete_min: 현재 노드: %d\n", node->data);
+    node->left = delete_min(node->left);
 
     // 높이 갱신
     update_height(node);
 
-    // 균형 인수 계산
-    int balance = get_balance_factor(node);
-
     // 균형 조정
-    // LL 회전
-    if (balance > 1 && get_balance_factor(node->left) >= 0)
-        return rotate_right(node);
+    int balance = get_balance_factor(node);
+    printf("delete_min: 노드 %d 균형 인수: %d\n", node->data, balance);
 
-    // LR 회전
+    if (balance > 1 && get_balance_factor(node->left) >= 0) {
+        return rotate_right(node);
+    }
+
     if (balance > 1 && get_balance_factor(node->left) < 0) {
         node->left = rotate_left(node->left);
         return rotate_right(node);
     }
 
-    // RR 회전
-    if (balance < -1 && get_balance_factor(node->right) <= 0)
+    if (balance < -1 && get_balance_factor(node->right) <= 0) {
         return rotate_left(node);
+    }
 
-    // RL 회전
     if (balance < -1 && get_balance_factor(node->right) > 0) {
         node->right = rotate_right(node->right);
         return rotate_left(node);
@@ -358,34 +406,6 @@ static Node *delete_max(Node *node) {
     return node;
 }
 
-// 우선순위 큐 초기화
-void init_priority_queue(priority_queue *pq) {
-    if (pq == NULL)
-        return;
-    pq->root = NULL;
-}
-
-// 우선순위 큐의 삽입 함수 (enqueue)
-void enqueue(priority_queue *pq, unsigned char data) {
-    if (pq == NULL)
-        return;
-    pthread_mutex_lock(&mutex);
-    pq->root = insert_node(pq->root, data);
-    pthread_mutex_unlock(&mutex);
-}
-
-// 우선순위 큐의 삭제 함수 (dequeue)
-unsigned char dequeue(priority_queue *pq) {
-    if (pq == NULL || pq->root == NULL) {
-        fprintf(stderr, "우선순위 큐가 비어 있습니다.\n");
-        exit(EXIT_FAILURE);
-    }
-
-    Node *maxNode = find_max(pq->root);
-    unsigned char maxValue = maxNode->data;
-    pq->root = delete_max(pq->root);
-    return maxValue;
-}
 
 // 우선순위 큐의 루트 노드를 반환하는 함수
 Node *get_root(priority_queue *pq) {
@@ -470,6 +490,7 @@ int find_size(int n, char *file_name) {
     }
 
     int size = lseek(fd, 0, SEEK_END);
+    close(fd);
 
     return size;
 }
