@@ -2,6 +2,13 @@
 #include <stdlib.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <pthread.h>
+
+#ifndef O_BINARY
+#define O_BINARY 0
+#endif
+
+pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
 // -----------------------
 // 1. 구조체 정의
@@ -21,6 +28,7 @@ typedef struct priority_queue {
 } priority_queue;
 
 typedef struct thread_arg {
+    char *file_name;
     priority_queue *pq_ptr;
     int quota;
     off_t offset;
@@ -88,42 +96,99 @@ int find_size(int n, char *file_name);
 // -----------------------
 
 int main(int argc, char *argv[]) {
-    int n = 10;
+    int n = 5;
     char *string = "673aef41575027558828.bmp";
-    // priority_queue pq;
-    // init_priority_queue(&pq);
-    //
-    // thread_arg **thread_args = (thread_arg **) malloc(n * sizeof(thread_arg *));
-    // for (int i = 0; i < n; i++) {
-    //     thread_args[i] = (thread_arg *) malloc(sizeof(thread_arg));
-    // }
-    //
-    // int size = find_size(n, string);
-    // int quota = size / n;
-    // off_t start_offset = find_offset(string);
-    // for (int i = 0; i < n - 1; i++) {
-    //     thread_args[i]->pq_ptr = &pq;
-    //     thread_args[i]->quota = quota;
-    //     thread_args[i]->offset = start_offset + i * quota;
-    // }
-    // thread_args[n - 1]->pq_ptr = &pq;
-    // thread_args[n - 1]->quota = size - (n - 1) * quota;
-    // thread_args[n - 1]->offset = start_offset + (n - 1) * quota;
-    //
-    // printf("Pixel Size: %d\n", size);
-    // printf("Quota: %d\n", quota);
-    // printf("Start Offset: %ld\n\n", start_offset);
-    // for (int i = 0; i < n; ++i) {
-    //     printf("Offset: %ld, Quota: %d\n", thread_args[i]->offset, thread_args[i]->quota);
-    // }
-    //
-    // for (int i = 0; i < n; i++) {
-    //     free(thread_args[i]);
-    // }
-    // free(thread_args);
-    //
-    // free_tree(pq.root);
+    char *string2 = "output.bmp";
+    priority_queue pq;
+    init_priority_queue(&pq);
+    thread_arg **thread_args;
+    pthread_t *thread_ids;
+    int status;
+    int read_fd;
+    int write_fd;
+    unsigned char buf;
+
+    thread_args = (thread_arg **) malloc(n * sizeof(thread_arg *));
+    for (int i = 0; i < n; i++) {
+        thread_args[i] = (thread_arg *) malloc(sizeof(thread_arg));
+    }
+
     int size = find_size(n, string);
+    int quota = size / n;
+    off_t start_offset = find_offset(string);
+    for (int i = 0; i < n - 1; i++) {
+        thread_args[i]->file_name = string;
+        thread_args[i]->pq_ptr = &pq;
+        thread_args[i]->quota = quota;
+        thread_args[i]->offset = start_offset + i * quota;
+    }
+    thread_args[n - 1]->file_name = string;
+    thread_args[n - 1]->pq_ptr = &pq;
+    thread_args[n - 1]->quota = size - (n - 1) * quota;
+    thread_args[n - 1]->offset = start_offset + (n - 1) * quota;
+
+    thread_ids = (pthread_t *) malloc(n * sizeof(pthread_t));
+    for (int i = 0; i < n; ++i) {
+        status = pthread_create(&thread_ids[i], NULL, thread_func, thread_args[i]);
+
+        if (status != 0) {
+            perror("pthread_create");
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    for (int i = 0; i < n; ++i) {
+        status = pthread_join(thread_ids[i], NULL);
+        if (status != 0) {
+            perror("pthread_join");
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    read_fd = open(string, O_RDONLY | O_BINARY);
+    write_fd = open(string2, O_WRONLY | O_BINARY | O_TRUNC | O_CREAT, 0777);
+    if (read_fd < 0 || write_fd < 0) {
+        perror("open");
+        exit(EXIT_FAILURE);
+    }
+
+    int i;
+    for (i = 0; i < start_offset; ++i) {
+        if (read(read_fd, &buf, sizeof(buf)) < 0) {
+            if (errno == EINTR) {
+                i--;
+                continue;
+            }
+            perror("read");
+            close(read_fd);
+            exit(EXIT_FAILURE);
+        }
+
+        if (write(write_fd, &buf, sizeof(buf)) < 0) {
+            perror("write");
+            close(write_fd);
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    while (pq.root != NULL) {
+        buf = dequeue(&pq);
+        if (write(write_fd, &buf, sizeof(buf)) < 0) {
+            perror("write");
+            close(write_fd);
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    close(read_fd);
+    close(write_fd);
+    pthread_mutex_destroy(&mutex);
+    free(thread_ids);
+    for (int i = 0; i < n; i++) {
+        free(thread_args[i]);
+    }
+    free(thread_args);
+    free_tree(pq.root);
 
     return 0;
 }
@@ -304,7 +369,9 @@ void init_priority_queue(priority_queue *pq) {
 void enqueue(priority_queue *pq, unsigned char data) {
     if (pq == NULL)
         return;
+    pthread_mutex_lock(&mutex);
     pq->root = insert_node(pq->root, data);
+    pthread_mutex_unlock(&mutex);
 }
 
 // 우선순위 큐의 삭제 함수 (dequeue)
@@ -347,8 +414,42 @@ void free_tree(Node *root) {
     free(root);
 }
 
+void *thread_func(void *arg) {
+    thread_arg *thread_argument = (thread_arg *) arg;
+    int fd;
+    unsigned char buf;
+    ssize_t ret;
+
+    fd = open(thread_argument->file_name, O_RDONLY | O_BINARY);
+    if (fd < 0) {
+        perror("open");
+        exit(EXIT_FAILURE);
+    }
+
+    lseek(fd, thread_argument->offset, SEEK_SET);
+    // pthread_mutex_lock(&mutex);
+    int i;
+    for (i = 0; i < thread_argument->quota; ++i) {
+        ret = read(fd, &buf, 1);
+        if (ret < 0) {
+            if (errno == EINTR) {
+                i--;
+                continue;
+            }
+            perror("read");
+            close(fd);
+            exit(EXIT_FAILURE);
+        }
+        enqueue(thread_argument->pq_ptr, buf);
+    }
+    // pthread_mutex_unlock(&mutex);
+
+    close(fd);
+    return NULL;
+}
+
 off_t find_offset(char *file_name) {
-    int fd = open(file_name, O_RDONLY);
+    int fd = open(file_name, O_RDONLY | O_BINARY);
     unsigned char bytes[4];
 
     lseek(fd, 10, SEEK_SET);
@@ -361,72 +462,14 @@ off_t find_offset(char *file_name) {
     return offset;
 }
 
-// int find_size(int n, char *file_name) {
-//     int fd = open(file_name, O_RDONLY);
-//     if (fd == -1) {
-//         perror("open");
-//         exit(EXIT_FAILURE);
-//     }
-//
-//     off_t offset = find_offset(file_name);
-//     unsigned char buf;
-//     int size = 0;
-//
-//     if (lseek(fd, offset, SEEK_SET) != offset) {
-//         perror("lseek");
-//         close(fd);
-//         exit(EXIT_FAILURE);
-//     }
-//     printf("Start Offset: %ld\n", offset);
-//
-//     while (1) {
-//         ssize_t bytes_read = read(fd, (void *)&buf, 1);
-//         if (bytes_read == -1) {
-//             perror("read");
-//             close(fd);
-//             exit(EXIT_FAILURE);
-//         }
-//         if (bytes_read == 0) {
-//             break;
-//         }
-//         size++;
-//     }
-//
-//     close(fd);
-//     printf("Size : %ld\n", size);
-//
-//     return size;
-// }
-
 int find_size(int n, char *file_name) {
-    int fd = open(file_name, O_RDONLY);
-    if (fd == -1) { // 파일 열기 실패
-        perror("파일 열기 실패");
-        return -1; // 에러 반환
+    int fd = open(file_name, O_RDONLY | O_BINARY);
+    if (fd == -1) {
+        perror("open");
+        exit(EXIT_FAILURE);
     }
 
-    unsigned char buf;
-    int size = 0;
+    int size = lseek(fd, 0, SEEK_END);
 
-    lseek(fd, 0, SEEK_SET);
-    while (1) {
-        ssize_t bytes_read = read(fd, &buf, 1);
-        if (bytes_read == -1) { // 읽기 오류
-            perror("읽기 오류");
-            close(fd);
-            return -1; // 에러 반환
-        }
-        if (bytes_read == 0) { // EOF
-            break;
-        }
-        printf("%lld\n", bytes_read);
-        size++;
-    }
-    printf("%d\n", size);
-    printf("%d\n", lseek(fd, 0, SEEK_END));
-
-
-    close(fd); // 파일 닫기
-    return size; // 총 바이트 수 반환
+    return size;
 }
-
