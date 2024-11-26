@@ -31,7 +31,7 @@ typedef struct priority_queue {
 typedef struct thread_arg {
     char *file_name;
     priority_queue *pq_ptr;
-    int quota;
+    off_t quota;
     off_t offset;
 } thread_arg;
 
@@ -90,14 +90,14 @@ void *thread_func(void *arg);
 
 off_t find_offset(char *file_name);
 
-int find_size(int n, char *file_name);
+off_t find_size(int n, char *file_name);
 
 // -----------------------
 // 4. 메인 함수
 // -----------------------
 
 int main(int argc, char *argv[]) {
-    int n = 5;
+    int n = 1;
     char *string = "673aef41575027558828.bmp";
     char *string2 = "output.bmp";
     priority_queue pq;
@@ -114,8 +114,8 @@ int main(int argc, char *argv[]) {
         thread_args[i] = (thread_arg *) malloc(sizeof(thread_arg));
     }
 
-    int size = find_size(n, string);
-    int quota = size / n;
+    off_t size = find_size(n, string);
+    off_t quota = size / n;
     off_t start_offset = find_offset(string);
     for (int i = 0; i < n - 1; i++) {
         thread_args[i]->file_name = string;
@@ -214,7 +214,7 @@ void enqueue(priority_queue *pq, unsigned char data) {
 
 unsigned char dequeue(priority_queue *pq) {
     if (pq == NULL || pq->root == NULL) {
-//        fprintf(stderr, "우선순위 큐가 비어 있습니다.\n");
+        // fprintf(stderr, "우선순위 큐가 비어 있습니다.\n");
         exit(EXIT_FAILURE);
     }
 
@@ -259,7 +259,7 @@ static void update_height(Node *node) {
 // 오른쪽 회전
 static Node *rotate_right(Node *y) {
     if (y == NULL || y->left == NULL) {
-//        fprintf(stderr, "rotate_right: 회전 불가\n");
+        // fprintf(stderr, "rotate_right: 회전 불가\n");
         return y;
     }
 
@@ -280,7 +280,7 @@ static Node *rotate_right(Node *y) {
 // 왼쪽 회전
 static Node *rotate_left(Node *x) {
     if (x == NULL || x->right == NULL) {
-//        fprintf(stderr, "rotate_left: 회전 불가\n");
+        // fprintf(stderr, "rotate_left: 회전 불가\n");
         return x;
     }
 
@@ -365,18 +365,18 @@ static Node *find_min(Node *node) {
 // 가장 작은 값을 가진 노드 삭제
 static Node *delete_min(Node *node) {
     if (node == NULL) {
-//        fprintf(stderr, "delete_min: NULL 노드 발견\n");
+        // fprintf(stderr, "delete_min: NULL 노드 발견\n");
         return NULL;
     }
 
     if (node->left == NULL) {
-//        printf("delete_min: 삭제할 노드: %d\n", node->data);
+        // printf("delete_min: 삭제할 노드: %d\n", node->data);
         Node *temp = node->right;
         free(node);
         return temp;
     }
 
-//    printf("delete_min: 현재 노드: %d\n", node->data);
+    // printf("delete_min: 현재 노드: %d\n", node->data);
     node->left = delete_min(node->left);
 
     // 높이 갱신
@@ -384,7 +384,7 @@ static Node *delete_min(Node *node) {
 
     // 균형 조정
     int balance = get_balance_factor(node);
-//    printf("delete_min: 노드 %d 균형 인수: %d\n", node->data, balance);
+    // printf("delete_min: 노드 %d 균형 인수: %d\n", node->data, balance);
 
     if (balance > 1 && get_balance_factor(node->left) >= 0) {
         return rotate_right(node);
@@ -411,7 +411,7 @@ static Node *delete_min(Node *node) {
 // 우선순위 큐의 루트 노드를 반환하는 함수
 Node *get_root(priority_queue *pq) {
     if (pq == NULL) {
-//        fprintf(stderr, "우선순위 큐가 초기화되지 않았습니다.\n");
+        // fprintf(stderr, "우선순위 큐가 초기화되지 않았습니다.\n");
         return NULL;
     }
     return pq->root;
@@ -449,7 +449,7 @@ void *thread_func(void *arg) {
 
     lseek(fd, thread_argument->offset, SEEK_SET);
     // pthread_mutex_lock(&mutex);
-    int i;
+    off_t i;
     for (i = 0; i < thread_argument->quota; ++i) {
         ret = read(fd, &buf, 1);
         if (ret < 0) {
@@ -460,6 +460,8 @@ void *thread_func(void *arg) {
             perror("read");
             close(fd);
             exit(EXIT_FAILURE);
+        } else if (ret == 0) {
+            break;
         }
         enqueue(thread_argument->pq_ptr, buf);
     }
@@ -483,14 +485,16 @@ off_t find_offset(char *file_name) {
     return offset;
 }
 
-int find_size(int n, char *file_name) {
+off_t find_size(int n, char *file_name) {
     int fd = open(file_name, O_RDONLY | O_BINARY);
     if (fd == -1) {
         perror("open");
         exit(EXIT_FAILURE);
     }
 
-    int size = lseek(fd, 0, SEEK_END);
+    off_t size = lseek(fd, 0, SEEK_END);
+    off_t start = find_offset(file_name);
+    size -= start;
     close(fd);
 
     return size;
