@@ -3,6 +3,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <errno.h>
 
 #ifndef O_BINARY
 #define O_BINARY 0
@@ -213,7 +214,7 @@ void enqueue(priority_queue *pq, unsigned char data) {
 
 unsigned char dequeue(priority_queue *pq) {
     if (pq == NULL || pq->root == NULL) {
-        fprintf(stderr, "우선순위 큐가 비어 있습니다.\n");
+//        fprintf(stderr, "우선순위 큐가 비어 있습니다.\n");
         exit(EXIT_FAILURE);
     }
 
@@ -258,7 +259,7 @@ static void update_height(Node *node) {
 // 오른쪽 회전
 static Node *rotate_right(Node *y) {
     if (y == NULL || y->left == NULL) {
-        fprintf(stderr, "rotate_right: 회전 불가\n");
+//        fprintf(stderr, "rotate_right: 회전 불가\n");
         return y;
     }
 
@@ -279,7 +280,7 @@ static Node *rotate_right(Node *y) {
 // 왼쪽 회전
 static Node *rotate_left(Node *x) {
     if (x == NULL || x->right == NULL) {
-        fprintf(stderr, "rotate_left: 회전 불가\n");
+//        fprintf(stderr, "rotate_left: 회전 불가\n");
         return x;
     }
 
@@ -364,18 +365,18 @@ static Node *find_min(Node *node) {
 // 가장 작은 값을 가진 노드 삭제
 static Node *delete_min(Node *node) {
     if (node == NULL) {
-        fprintf(stderr, "delete_min: NULL 노드 발견\n");
+//        fprintf(stderr, "delete_min: NULL 노드 발견\n");
         return NULL;
     }
 
     if (node->left == NULL) {
-        printf("delete_min: 삭제할 노드: %d\n", node->data);
+//        printf("delete_min: 삭제할 노드: %d\n", node->data);
         Node *temp = node->right;
         free(node);
         return temp;
     }
 
-    printf("delete_min: 현재 노드: %d\n", node->data);
+//    printf("delete_min: 현재 노드: %d\n", node->data);
     node->left = delete_min(node->left);
 
     // 높이 갱신
@@ -383,7 +384,7 @@ static Node *delete_min(Node *node) {
 
     // 균형 조정
     int balance = get_balance_factor(node);
-    printf("delete_min: 노드 %d 균형 인수: %d\n", node->data, balance);
+//    printf("delete_min: 노드 %d 균형 인수: %d\n", node->data, balance);
 
     if (balance > 1 && get_balance_factor(node->left) >= 0) {
         return rotate_right(node);
@@ -410,7 +411,7 @@ static Node *delete_min(Node *node) {
 // 우선순위 큐의 루트 노드를 반환하는 함수
 Node *get_root(priority_queue *pq) {
     if (pq == NULL) {
-        fprintf(stderr, "우선순위 큐가 초기화되지 않았습니다.\n");
+//        fprintf(stderr, "우선순위 큐가 초기화되지 않았습니다.\n");
         return NULL;
     }
     return pq->root;
